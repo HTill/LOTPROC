@@ -159,6 +159,56 @@ Pipeline.from_root(source_root) \
     .run()
 ```
 
+## Example: end-to-end source DB to derived DB
+
+```python
+from lotdb import LOTDB
+from lotproc import NewDatabaseTarget, Pipeline, ProcessResult
+
+
+def compute_features(records):
+    results = []
+    for record in records:
+        duration = record.attributes.get("duration")
+        results.append(
+            ProcessResult(
+                path=record.path,
+                output={"feature": duration * 2},
+                attributes={"source_duration": duration, "processor": "compute_features"},
+                relative_path=("derived", "features"),
+            )
+        )
+    return results
+
+
+source_db = LOTDB(path="./source_data", name="source.fs", new=True)
+source_root = source_db.open_connection()
+
+source_root.gns(["speaker_01", "session_a", "clip_001"]).set_attribute("duration", 1.2)
+source_root.gns(["speaker_02", "session_b", "clip_002"]).set_attribute("duration", 0.8)
+source_db.commit()
+
+derived_db = LOTDB(path="./derived_data", name="derived.fs", new=True)
+derived_root = derived_db.open_connection()
+
+Pipeline.from_root(source_root) \
+    .traverse("leaves") \
+    .buffer(64) \
+    .prepare(attribute_names=["duration"]) \
+    .process(compute_features) \
+    .write(NewDatabaseTarget(root=derived_root, output_attribute="result")) \
+    .run()
+
+derived_db.commit()
+
+source_db.close_connection()
+source_db.close()
+derived_db.close_connection()
+derived_db.close()
+```
+
+This pattern is useful when you want to keep the source DB clean and write all derived artifacts into a separate LOTDB.
+
 ## Write targets and policies
 
 - `InlineTarget(...)`: write under the same source tree
