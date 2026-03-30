@@ -1,6 +1,6 @@
 # LOTPROC
 
-Light Object Tree processing toolkit.
+Light Object Tree processing toolkit built on top of `lotdb`.
 
 LOTPROC is intended as a lightweight processing layer for `lotdb` workflows.
 It depends on `lotdb` and is designed around real `lotdb.BaseNode` trees.
@@ -20,6 +20,17 @@ This repository mirrors the same high-level layout as `lotdb`:
 - `tests/` for test coverage
 - `docs/` for API and design notes
 - `.github/workflows/` for CI and publishing automation
+
+## Install
+
+```bash
+pip install lotdb lotproc
+```
+
+## Basic idea
+
+`lotdb` owns storage and tree mechanics.
+`lotproc` owns filtering, batching, processing, and write strategies.
 
 ## Current building blocks
 
@@ -43,7 +54,7 @@ The processing layer is also available as reusable specs/stages rather than one 
 
 So `node_process_cruncher(...)` is now just the convenience wrapper on top.
 
-## Example
+## Example: buffered processing pipeline
 
 ```python
 from lotdb import LOTDB
@@ -116,6 +127,38 @@ Why this matters:
 - multiprocessing becomes safer
 - workers operate on materialized data, not persistent objects
 
+## Example: mirrored output tree
+
+```python
+from lotdb import BaseNode
+from lotproc import MirrorTarget, Pipeline, ProcessResult
+
+
+def uppercase_keys(records):
+    return [
+        ProcessResult(
+            path=record.path,
+            output=record.key.upper(),
+            relative_path=("derived",),
+        )
+        for record in records
+    ]
+
+
+source_root = BaseNode("root")
+source_root.gns(["speaker_01", "session_a", "clip_001"])
+
+mirror_root = BaseNode("mirror")
+
+Pipeline.from_root(source_root) \
+    .traverse("leaves") \
+    .buffer(64) \
+    .prepare() \
+    .process(uppercase_keys, mode="sync") \
+    .write(MirrorTarget(root=mirror_root, output_attribute="value")) \
+    .run()
+```
+
 ## Write targets and policies
 
 - `InlineTarget(...)`: write under the same source tree
@@ -128,6 +171,7 @@ Example:
 ```python
 from lotproc import InlineWritePolicy, WriteTarget
 
+
 target = WriteTarget(
     root=root,
     policy=InlineWritePolicy(base_path=("results", "run_001")),
@@ -135,7 +179,7 @@ target = WriteTarget(
 )
 ```
 
-## Reusable processing specs
+## Example: reusable processing specs
 
 ```python
 from lotproc import (
@@ -159,7 +203,10 @@ pipeline = build_node_process_pipeline(
 pipeline.run()
 ```
 
-Multiprocessing is intentionally gated behind buffering so that worker processes receive materialized, serializable batches instead of live database node objects.
+## Multiprocessing note
+
+Multiprocessing is only allowed after buffering.
+That way workers receive materialized, serializable batches instead of live LOTDB nodes.
 
 The underlying tree iteration primitives remain in `lotdb`; LOTPROC wraps and composes them into processing workflows.
 
